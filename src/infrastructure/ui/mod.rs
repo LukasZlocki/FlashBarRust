@@ -3,9 +3,40 @@
 slint::include_modules!();
 
 use std::error::Error;
+use std::path::Path;
 use std::time::Duration;
 
 use slint::winit_030::{WinitWindowAccessor, winit};
+use slint::Image;
+
+use crate::models::AppEntry;
+
+/// Row for a search result. Shows the app icon when one can be loaded.
+pub fn app_row(app: &AppEntry) -> ResultRow {
+    let icon = app
+        .icon_path
+        .as_deref()
+        .and_then(|path| Image::load_from_path(path).ok());
+    ResultRow {
+        name: app.name.clone().into(),
+        has_icon: icon.is_some(),
+        icon: icon.unwrap_or_default(),
+    }
+}
+
+/// Row for an executable in the picker. Shows the file name only.
+pub fn exe_row(exe: &Path) -> ResultRow {
+    let name = exe
+        .file_name()
+        .unwrap_or(exe.as_os_str())
+        .to_string_lossy()
+        .into_owned();
+    ResultRow {
+        name: name.into(),
+        has_icon: false,
+        icon: Image::default(),
+    }
+}
 
 /// Selects the winit backend, which is needed for window positioning.
 pub fn create_window() -> Result<AppWindow, Box<dyn Error>> {

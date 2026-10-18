@@ -2,13 +2,15 @@
 
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use crate::models::AppEntry;
-use crate::repository::{AppRepository, RepositoryError};
+use crate::repository::{AppLauncher, AppRepository, LaunchError, RepositoryError};
 
 const SYSTEM_APPLICATIONS_DIR: &str = "/usr/share/applications";
 const SYSTEM_ICON_THEME_DIR: &str = "/usr/share/icons/hicolor";
@@ -18,6 +20,7 @@ pub struct LinuxAppRepository {
     application_dirs: Vec<PathBuf>,
     icon_theme_dirs: Vec<PathBuf>,
     pixmap_dir: PathBuf,
+    path_var: Option<OsString>,
 }
 
 impl LinuxAppRepository {
@@ -33,19 +36,22 @@ impl LinuxAppRepository {
             application_dirs,
             icon_theme_dirs,
             pixmap_dir: PathBuf::from(PIXMAPS_DIR),
+            path_var: std::env::var_os("PATH"),
         }
     }
 
-    fn to_app_entry(&self, entry: DesktopEntry) -> AppEntry {
+    /// Returns `None` when the `Exec` program cannot be found, so the app is not listed.
+    fn to_app_entry(&self, entry: DesktopEntry) -> Option<AppEntry> {
+        let executable = resolve_executable(&entry.exec, self.path_var.as_deref())?;
         let icon_path = entry
             .icon
             .as_deref()
             .and_then(|icon| self.resolve_icon(icon));
-        AppEntry {
+        Some(AppEntry {
             name: entry.name,
-            launch_command: entry.exec,
+            launch_command: executable.to_string_lossy().into_owned(),
             icon_path,
-        }
+        })
     }
 
     fn resolve_icon(&self, icon: &str) -> Option<PathBuf> {
@@ -84,9 +90,59 @@ impl AppRepository for LinuxAppRepository {
         }
         Ok(by_file_name
             .into_values()
-            .map(|entry| self.to_app_entry(entry))
+            .filter_map(|entry| self.to_app_entry(entry))
             .collect())
     }
+}
+
+/// Starts apps by running the executable stored as their link. No shell is involved.
+pub struct LinuxAppLauncher;
+
+impl AppLauncher for LinuxAppLauncher {
+    fn launch(&self, app: &AppEntry) -> Result<(), LaunchError> {
+        let mut child = Command::new(&app.launch_command)
+            .spawn()
+            .map_err(LaunchError::Spawn)?;
+        // Reap the child in the background so it does not stay a zombie process.
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+        Ok(())
+    }
+}
+
+/// Finds the file that an `Exec` value starts. Flatpak and Snap wrappers are not the app itself, so they are skipped.
+fn resolve_executable(exec: &str, path_var: Option<&OsStr>) -> Option<PathBuf> {
+    let program = first_word(exec)?;
+    if matches!(program.as_str(), "flatpak" | "snap") {
+        return None;
+    }
+
+    let program = Path::new(&program);
+    if program.is_absolute() {
+        return is_executable(program).then(|| program.to_path_buf());
+    }
+    if program.components().count() != 1 {
+        return None;
+    }
+    std::env::split_paths(path_var?)
+        .map(|dir| dir.join(program))
+        .find(|candidate| is_executable(candidate))
+}
+
+fn is_executable(path: &Path) -> bool {
+    fs::metadata(path)
+        .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+}
+
+/// First word of an `Exec` value. A double-quoted program path stays together.
+fn first_word(exec: &str) -> Option<String> {
+    let exec = exec.trim_start();
+    let word = match exec.strip_prefix('"') {
+        Some(quoted) => &quoted[..quoted.find('"')?],
+        None => exec.split_whitespace().next()?,
+    };
+    (!word.is_empty()).then(|| word.to_string())
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -278,13 +334,23 @@ mod tests {
         assert_eq!(strip_field_codes("app --name=%% %F"), "app --name=%");
     }
 
+    fn make_executable(path: &Path) {
+        fs::write(path, b"#!/bin/sh\n").unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
     #[test]
     fn user_entry_overrides_system_and_no_display_hides() {
         let root = temp_dir("override");
         let system = root.join("system");
         let user = root.join("user");
+        let bin = root.join("bin");
         fs::create_dir_all(&system).unwrap();
         fs::create_dir_all(&user).unwrap();
+        fs::create_dir_all(&bin).unwrap();
+        make_executable(&bin.join("sys-editor"));
+        make_executable(&bin.join("my-editor"));
+        make_executable(&bin.join("hidden"));
         fs::write(
             system.join("editor.desktop"),
             "[Desktop Entry]\nType=Application\nName=System Editor\nExec=sys-editor\n",
@@ -306,6 +372,7 @@ mod tests {
             application_dirs: vec![system, user],
             icon_theme_dirs: vec![],
             pixmap_dir: root.join("pixmaps"),
+            path_var: Some(bin.clone().into_os_string()),
         };
         let apps = repo.all_apps().expect("discovery succeeds");
         fs::remove_dir_all(&root).unwrap();
@@ -314,10 +381,85 @@ mod tests {
             apps,
             vec![AppEntry {
                 name: "My Editor".into(),
-                launch_command: "my-editor".into(),
+                launch_command: bin.join("my-editor").to_string_lossy().into_owned(),
                 icon_path: None,
             }]
         );
+    }
+
+    #[test]
+    fn apps_whose_exec_is_missing_are_not_listed() {
+        let root = temp_dir("missing-exec");
+        let apps_dir = root.join("apps");
+        fs::create_dir_all(&apps_dir).unwrap();
+        fs::write(
+            apps_dir.join("ghost.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Ghost\nExec=no-such-program-xyz\n",
+        )
+        .unwrap();
+
+        let repo = LinuxAppRepository {
+            application_dirs: vec![apps_dir],
+            icon_theme_dirs: vec![],
+            pixmap_dir: root.join("pixmaps"),
+            path_var: Some(root.clone().into_os_string()),
+        };
+        let apps = repo.all_apps().expect("discovery succeeds");
+        fs::remove_dir_all(&root).unwrap();
+
+        assert!(apps.is_empty());
+    }
+
+    #[test]
+    fn flatpak_and_snap_wrappers_are_skipped() {
+        assert_eq!(resolve_executable("flatpak run org.app", Some(OsStr::new("/usr/bin"))), None);
+        assert_eq!(resolve_executable("snap run app", Some(OsStr::new("/usr/bin"))), None);
+    }
+
+    #[test]
+    fn absolute_exec_must_be_an_executable_file() {
+        let root = temp_dir("absolute");
+        let tool = root.join("tool");
+        make_executable(&tool);
+        let plain = root.join("plain");
+        fs::write(&plain, b"data").unwrap();
+
+        let found = resolve_executable(tool.to_str().unwrap(), None);
+        let not_executable = resolve_executable(plain.to_str().unwrap(), None);
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(found, Some(tool));
+        assert_eq!(not_executable, None);
+    }
+
+    #[test]
+    fn bare_program_is_looked_up_on_path() {
+        let root = temp_dir("path-lookup");
+        make_executable(&root.join("tool"));
+        let found = resolve_executable("tool --flag %U", Some(root.clone().as_os_str()));
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(found, Some(root.join("tool")));
+    }
+
+    #[test]
+    fn first_word_keeps_quoted_paths_together() {
+        assert_eq!(
+            first_word("\"/opt/my app/run\" --x"),
+            Some("/opt/my app/run".to_string())
+        );
+        assert_eq!(first_word("  tool arg"), Some("tool".to_string()));
+        assert_eq!(first_word("   "), None);
+    }
+
+    #[test]
+    fn launcher_reports_missing_program() {
+        let app = AppEntry {
+            name: "Ghost".into(),
+            launch_command: "/no/such/program-xyz".into(),
+            icon_path: None,
+        };
+        assert!(matches!(LinuxAppLauncher.launch(&app), Err(LaunchError::Spawn(_))));
     }
 
     #[test]
@@ -334,6 +476,7 @@ mod tests {
             application_dirs: vec![],
             icon_theme_dirs: vec![theme.clone()],
             pixmap_dir: pixmaps,
+            path_var: None,
         };
         let tool = repo.resolve_icon("tool");
         let legacy = repo.resolve_icon("legacy");

@@ -1,5 +1,6 @@
 //! Platform implementations and Slint UI integration. Depends on service, repository and models.
 
+pub mod storage;
 pub mod ui;
 
 #[cfg(target_os = "windows")]
