@@ -56,6 +56,16 @@ pub fn center_on_startup(window: &AppWindow) {
     });
 }
 
+/// Gives the native window keyboard focus once the event loop has created it.
+pub fn focus_on_startup(window: &AppWindow) {
+    let weak = window.as_weak();
+    slint::Timer::single_shot(Duration::ZERO, move || {
+        if let Some(window) = weak.upgrade() {
+            window.window().with_winit_window(|native| native.focus_window());
+        }
+    });
+}
+
 fn center(window: &AppWindow) {
     window.window().with_winit_window(|native| {
         // Wayland and some setups return no monitor; the window then keeps its default place.
