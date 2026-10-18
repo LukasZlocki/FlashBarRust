@@ -1,14 +1,20 @@
 export struct ResultRow {
     name: string,
+    icon: image,
+    has-icon: bool,
 }
 
 export component AppWindow inherits Window {
     in-out property <[ResultRow]> results;
+    in-out property <int> selected: 0;
+    in-out property <string> status-text;
     callback query-changed(string);
+    callback launch-requested(int);
+    callback escape-pressed();
 
     title: "FlashBar";
     width: 600px;
-    height: 220px;
+    height: 260px;
     no-frame: true;
     background: transparent;
     forward-focus: search;
@@ -22,14 +28,6 @@ export component AppWindow inherits Window {
         border-radius: 24px;
 
         FocusScope {
-            key-pressed(event) => {
-                if (event.text == Key.Escape) {
-                    root.hide();
-                    return accept;
-                }
-                return reject;
-            }
-
             VerticalLayout {
                 padding: 16px;
                 spacing: 10px;
@@ -61,25 +59,56 @@ export component AppWindow inherits Window {
                         edited => {
                             root.query-changed(self.text);
                         }
+                        key-pressed(event) => {
+                            if (event.text == Key.Escape) {
+                                root.escape-pressed();
+                                return accept;
+                            }
+                            if (event.text == Key.UpArrow) {
+                                root.selected = Math.max(0, root.selected - 1);
+                                return accept;
+                            }
+                            if (event.text == Key.DownArrow) {
+                                if (root.selected + 1 < root.results.length) {
+                                    root.selected += 1;
+                                }
+                                return accept;
+                            }
+                            if (event.text == Key.Return) {
+                                root.launch-requested(root.selected);
+                                return accept;
+                            }
+                            return reject;
+                        }
                     }
                 }
 
                 VerticalLayout {
                     spacing: 2px;
 
-                    for row in root.results : Rectangle {
+                    for row[index] in root.results : Rectangle {
                         height: 26px;
                         border-radius: 6px;
+                        background: index == root.selected ? #3a3a3a : transparent;
 
                         HorizontalLayout {
                             padding-left: 8px;
                             spacing: 10px;
+
+                            Image {
+                                width: 18px;
+                                height: 18px;
+                                source: row.icon;
+                                image-fit: contain;
+                                visible: row.has-icon;
+                            }
 
                             Rectangle {
                                 width: 18px;
                                 height: 18px;
                                 border-radius: 4px;
                                 background: #3a3a3a;
+                                visible: !row.has-icon;
                             }
 
                             Text {
@@ -91,6 +120,14 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
+                }
+
+                Text {
+                    text: root.status-text;
+                    color: #ff8a8a;
+                    font-size: 12px;
+                    overflow: elide;
+                    visible: root.status-text != "";
                 }
             }
         }
