@@ -29,9 +29,12 @@ export component AppWindow inherits Window {
         ? root.status-top + root.status-height
         : (root.results.length > 0 ? root.list-top + root.list-height : root.search-bottom);
 
+    out property <length> panel-width: 600px;
+    out property <length> panel-height: root.content-bottom + root.pad;
+
     title: "FlashBar";
-    width: 600px;
-    height: root.content-bottom + root.pad;
+    width: root.panel-width;
+    height: root.panel-height;
     no-frame: true;
     background: transparent;
     forward-focus: search;

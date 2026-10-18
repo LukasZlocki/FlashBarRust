@@ -49,10 +49,13 @@ pub fn create_window() -> Result<AppWindow, Box<dyn Error>> {
 
 /// Centers the window on the first native event, when the winit window exists.
 pub fn center_on_startup(window: &AppWindow) {
+    let weak = window.as_weak();
     let mut centered = false;
-    window.window().on_winit_window_event(move |window, event| {
+    window.window().on_winit_window_event(move |_, event| {
         if !centered && matches!(event, WindowEvent::Resized(_) | WindowEvent::RedrawRequested) {
-            centered = center(window);
+            if let Some(window) = weak.upgrade() {
+                centered = center(&window);
+            }
         }
         EventResult::Propagate
     });
@@ -69,17 +72,21 @@ pub fn focus_on_startup(window: &AppWindow) {
 }
 
 /// Returns `true` when the window was positioned. Wayland ignores client positions.
-fn center(window: &slint::Window) -> bool {
+fn center(window: &AppWindow) -> bool {
     window
+        .window()
         .with_winit_window(|native| {
             let Some(monitor) = native.current_monitor().or_else(|| native.primary_monitor()) else {
                 return false;
             };
+            // Slint resizes the window after creation, so use its final size, not the current one.
+            let scale = native.scale_factor();
+            let window_width = (window.get_panel_width() as f64 * scale).round() as i32;
+            let window_height = (window.get_panel_height() as f64 * scale).round() as i32;
             let monitor_pos = monitor.position();
             let monitor_size = monitor.size();
-            let window_size = native.outer_size();
-            let x = monitor_pos.x + (monitor_size.width as i32 - window_size.width as i32) / 2;
-            let y = monitor_pos.y + (monitor_size.height as i32 - window_size.height as i32) / 2;
+            let x = monitor_pos.x + (monitor_size.width as i32 - window_width) / 2;
+            let y = monitor_pos.y + (monitor_size.height as i32 - window_height) / 2;
             native.set_outer_position(winit::dpi::PhysicalPosition::new(x, y));
             true
         })
