@@ -12,9 +12,26 @@ export component AppWindow inherits Window {
     callback launch-requested(int);
     callback escape-pressed();
 
+    property <length> pad: 16px;
+    property <length> search-height: 40px;
+    property <length> item-gap: 10px;
+    property <length> row-height: 26px;
+    property <length> row-gap: 2px;
+    property <length> status-height: 16px;
+    property <bool> show-status: root.status-text != "";
+    property <length> search-bottom: root.pad + root.search-height;
+    property <length> list-top: root.search-bottom + root.item-gap;
+    property <length> list-height: root.results.length > 0
+        ? root.row-height * root.results.length + root.row-gap * (root.results.length - 1)
+        : 0px;
+    property <length> status-top: root.list-top + (root.results.length > 0 ? root.list-height + root.item-gap : 0px);
+    property <length> content-bottom: root.show-status
+        ? root.status-top + root.status-height
+        : (root.results.length > 0 ? root.list-top + root.list-height : root.search-bottom);
+
     title: "FlashBar";
     width: 600px;
-    height: 260px;
+    height: root.content-bottom + root.pad;
     no-frame: true;
     background: transparent;
     forward-focus: search;
@@ -27,109 +44,108 @@ export component AppWindow inherits Window {
         background: black;
         border-radius: 24px;
 
-        FocusScope {
-            VerticalLayout {
-                padding: 16px;
+        Rectangle {
+            x: root.pad;
+            y: root.pad;
+            width: root.width - root.pad * 2;
+            height: root.search-height;
+            border-radius: 12px;
+            background: #1e1e1e;
+
+            Text {
+                x: 14px;
+                width: 100%;
+                height: 100%;
+                text: "search";
+                color: #777777;
+                font-size: 16px;
+                vertical-alignment: center;
+                visible: search.text == "";
+            }
+
+            search := TextInput {
+                x: 14px;
+                width: parent.width - 28px;
+                height: 100%;
+                color: white;
+                font-size: 16px;
+                single-line: true;
+                vertical-alignment: center;
+                edited => {
+                    root.query-changed(self.text);
+                }
+                key-pressed(event) => {
+                    if (event.text == Key.Escape) {
+                        root.escape-pressed();
+                        return accept;
+                    }
+                    if (event.text == Key.UpArrow) {
+                        root.selected = Math.max(0, root.selected - 1);
+                        return accept;
+                    }
+                    if (event.text == Key.DownArrow) {
+                        if (root.selected + 1 < root.results.length) {
+                            root.selected += 1;
+                        }
+                        return accept;
+                    }
+                    if (event.text == Key.Return) {
+                        root.launch-requested(root.selected);
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
+        }
+
+        for row[index] in root.results : Rectangle {
+            x: root.pad;
+            y: root.list-top + (root.row-height + root.row-gap) * index;
+            width: root.width - root.pad * 2;
+            height: root.row-height;
+            border-radius: 6px;
+            background: index == root.selected ? #3a3a3a : transparent;
+
+            HorizontalLayout {
+                padding-left: 8px;
                 spacing: 10px;
 
-                Rectangle {
-                    height: 40px;
-                    border-radius: 12px;
-                    background: #1e1e1e;
-
-                    Text {
-                        x: 14px;
-                        width: 100%;
-                        height: 100%;
-                        text: "search";
-                        color: #777777;
-                        font-size: 16px;
-                        vertical-alignment: center;
-                        visible: search.text == "";
-                    }
-
-                    search := TextInput {
-                        x: 14px;
-                        width: parent.width - 28px;
-                        height: 100%;
-                        color: white;
-                        font-size: 16px;
-                        single-line: true;
-                        vertical-alignment: center;
-                        edited => {
-                            root.query-changed(self.text);
-                        }
-                        key-pressed(event) => {
-                            if (event.text == Key.Escape) {
-                                root.escape-pressed();
-                                return accept;
-                            }
-                            if (event.text == Key.UpArrow) {
-                                root.selected = Math.max(0, root.selected - 1);
-                                return accept;
-                            }
-                            if (event.text == Key.DownArrow) {
-                                if (root.selected + 1 < root.results.length) {
-                                    root.selected += 1;
-                                }
-                                return accept;
-                            }
-                            if (event.text == Key.Return) {
-                                root.launch-requested(root.selected);
-                                return accept;
-                            }
-                            return reject;
-                        }
-                    }
+                Image {
+                    width: 18px;
+                    height: 18px;
+                    source: row.icon;
+                    image-fit: contain;
+                    visible: row.has-icon;
                 }
 
-                VerticalLayout {
-                    spacing: 2px;
-
-                    for row[index] in root.results : Rectangle {
-                        height: 26px;
-                        border-radius: 6px;
-                        background: index == root.selected ? #3a3a3a : transparent;
-
-                        HorizontalLayout {
-                            padding-left: 8px;
-                            spacing: 10px;
-
-                            Image {
-                                width: 18px;
-                                height: 18px;
-                                source: row.icon;
-                                image-fit: contain;
-                                visible: row.has-icon;
-                            }
-
-                            Rectangle {
-                                width: 18px;
-                                height: 18px;
-                                border-radius: 4px;
-                                background: #3a3a3a;
-                                visible: !row.has-icon;
-                            }
-
-                            Text {
-                                text: row.name;
-                                color: white;
-                                font-size: 14px;
-                                vertical-alignment: center;
-                                overflow: elide;
-                            }
-                        }
-                    }
+                Rectangle {
+                    width: 18px;
+                    height: 18px;
+                    border-radius: 4px;
+                    background: #3a3a3a;
+                    visible: !row.has-icon;
                 }
 
                 Text {
-                    text: root.status-text;
-                    color: #ff8a8a;
-                    font-size: 12px;
+                    text: row.name;
+                    color: white;
+                    font-size: 14px;
+                    vertical-alignment: center;
                     overflow: elide;
-                    visible: root.status-text != "";
                 }
             }
+        }
+
+        Text {
+            x: root.pad;
+            y: root.status-top;
+            width: root.width - root.pad * 2;
+            height: root.status-height;
+            text: root.status-text;
+            color: #ff8a8a;
+            font-size: 12px;
+            overflow: elide;
+            visible: root.show-status;
         }
     }
 }
