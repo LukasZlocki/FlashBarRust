@@ -1,0 +1,21 @@
+# Build output
+/target/
+
+# Backup and temporary files
+*.rs.bk
+*.tmp
+
+# IDE and editor settings
+.idea/
+*.swp
+*.swo
+*~
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Environment and local secrets
+.env
+.env.*
