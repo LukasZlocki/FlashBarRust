@@ -36,6 +36,10 @@ export component AppWindow inherits Window {
     background: transparent;
     forward-focus: search;
 
+    init => {
+        search.focus();
+    }
+
     Rectangle {
         x: 0;
         y: 0;

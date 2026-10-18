@@ -150,6 +150,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     ui::center_on_startup(&window);
+    ui::focus_on_startup(&window);
     window.run()?;
     Ok(())
 }
