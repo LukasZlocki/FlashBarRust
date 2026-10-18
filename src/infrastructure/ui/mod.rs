@@ -6,7 +6,8 @@ use std::error::Error;
 use std::path::Path;
 use std::time::Duration;
 
-use slint::winit_030::{WinitWindowAccessor, winit};
+use slint::winit_030::winit::event::WindowEvent;
+use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 use slint::Image;
 
 use crate::models::AppEntry;
@@ -46,13 +47,14 @@ pub fn create_window() -> Result<AppWindow, Box<dyn Error>> {
     Ok(AppWindow::new()?)
 }
 
-/// Centers the window once the event loop has created the native window.
+/// Centers the window on the first native event, when the winit window exists.
 pub fn center_on_startup(window: &AppWindow) {
-    let weak = window.as_weak();
-    slint::Timer::single_shot(Duration::ZERO, move || {
-        if let Some(window) = weak.upgrade() {
-            center(&window);
+    let mut centered = false;
+    window.window().on_winit_window_event(move |window, event| {
+        if !centered && matches!(event, WindowEvent::Resized(_) | WindowEvent::RedrawRequested) {
+            centered = center(window);
         }
+        EventResult::Propagate
     });
 }
 
@@ -66,17 +68,20 @@ pub fn focus_on_startup(window: &AppWindow) {
     });
 }
 
-fn center(window: &AppWindow) {
-    window.window().with_winit_window(|native| {
-        // Wayland and some setups return no monitor; the window then keeps its default place.
-        let Some(monitor) = native.current_monitor() else {
-            return;
-        };
-        let monitor_pos = monitor.position();
-        let monitor_size = monitor.size();
-        let window_size = native.outer_size();
-        let x = monitor_pos.x + (monitor_size.width as i32 - window_size.width as i32) / 2;
-        let y = monitor_pos.y + (monitor_size.height as i32 - window_size.height as i32) / 2;
-        native.set_outer_position(winit::dpi::PhysicalPosition::new(x, y));
-    });
+/// Returns `true` when the window was positioned. Wayland ignores client positions.
+fn center(window: &slint::Window) -> bool {
+    window
+        .with_winit_window(|native| {
+            let Some(monitor) = native.current_monitor().or_else(|| native.primary_monitor()) else {
+                return false;
+            };
+            let monitor_pos = monitor.position();
+            let monitor_size = monitor.size();
+            let window_size = native.outer_size();
+            let x = monitor_pos.x + (monitor_size.width as i32 - window_size.width as i32) / 2;
+            let y = monitor_pos.y + (monitor_size.height as i32 - window_size.height as i32) / 2;
+            native.set_outer_position(winit::dpi::PhysicalPosition::new(x, y));
+            true
+        })
+        .unwrap_or(false)
 }
