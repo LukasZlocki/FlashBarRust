@@ -110,33 +110,35 @@ export component AppWindow inherits Window {
             border-radius: 6px;
             background: index == root.selected ? #3a3a3a : transparent;
 
-            HorizontalLayout {
-                padding-left: 8px;
-                spacing: 10px;
+            Image {
+                x: 8px;
+                y: (parent.height - self.height) / 2;
+                width: 18px;
+                height: 18px;
+                source: row.icon;
+                image-fit: contain;
+                visible: row.has-icon;
+            }
 
-                Image {
-                    width: 18px;
-                    height: 18px;
-                    source: row.icon;
-                    image-fit: contain;
-                    visible: row.has-icon;
-                }
+            Rectangle {
+                x: 8px;
+                y: (parent.height - self.height) / 2;
+                width: 18px;
+                height: 18px;
+                border-radius: 4px;
+                background: #3a3a3a;
+                visible: !row.has-icon;
+            }
 
-                Rectangle {
-                    width: 18px;
-                    height: 18px;
-                    border-radius: 4px;
-                    background: #3a3a3a;
-                    visible: !row.has-icon;
-                }
-
-                Text {
-                    text: row.name;
-                    color: white;
-                    font-size: 14px;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
+            Text {
+                x: 36px;
+                width: parent.width - 44px;
+                height: parent.height;
+                text: row.name;
+                color: white;
+                font-size: 14px;
+                vertical-alignment: center;
+                overflow: elide;
             }
         }
 
